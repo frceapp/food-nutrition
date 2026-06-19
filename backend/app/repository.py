@@ -8,14 +8,18 @@ from uuid import uuid4
 from app.config import Settings, get_settings
 from app.domain import (
     FoodAnalysisLog,
+    RuntimeSettings,
     User,
     UserProfile,
+    UsageEvent,
     WhitelistEntry,
     log_from_document,
     profile_from_document,
+    runtime_settings_from_document,
     to_document,
     user_from_document,
     utc_now,
+    usage_event_from_document,
     whitelist_from_document,
 )
 
@@ -69,6 +73,24 @@ class NutritionRepository(ABC):
         expires_at: datetime,
     ) -> None: ...
 
+    @abstractmethod
+    def get_runtime_settings(self) -> RuntimeSettings: ...
+
+    @abstractmethod
+    def add_usage_event(self, event: UsageEvent) -> UsageEvent: ...
+
+    @abstractmethod
+    def save_usage_event(self, event: UsageEvent) -> None: ...
+
+    @abstractmethod
+    def get_usage_events(
+        self,
+        start: datetime,
+        end: datetime | None = None,
+        *,
+        phone_number: str | None = None,
+    ) -> list[UsageEvent]: ...
+
 
 class InMemoryRepository(NutritionRepository):
     def __init__(self) -> None:
@@ -77,6 +99,8 @@ class InMemoryRepository(NutritionRepository):
         self.logs: dict[str, FoodAnalysisLog] = {}
         self.whitelist: dict[str, WhitelistEntry] = {}
         self.login_codes: dict[str, tuple[str, str, datetime]] = {}
+        self.runtime_settings = RuntimeSettings()
+        self.usage_events: dict[str, UsageEvent] = {}
 
     def clear(self) -> None:
         self.users.clear()
@@ -84,6 +108,8 @@ class InMemoryRepository(NutritionRepository):
         self.logs.clear()
         self.whitelist.clear()
         self.login_codes.clear()
+        self.runtime_settings = RuntimeSettings()
+        self.usage_events.clear()
 
     def get_user(self, phone_number: str) -> User | None:
         return self.users.get(phone_number)
@@ -148,6 +174,35 @@ class InMemoryRepository(NutritionRepository):
         expires_at: datetime,
     ) -> None:
         self.login_codes[code_hash] = (phone_number, custom_token, expires_at)
+
+    def get_runtime_settings(self) -> RuntimeSettings:
+        return self.runtime_settings
+
+    def add_usage_event(self, event: UsageEvent) -> UsageEvent:
+        event.id = event.id or uuid4().hex
+        self.usage_events[event.id] = event
+        return event
+
+    def save_usage_event(self, event: UsageEvent) -> None:
+        if not event.id:
+            self.add_usage_event(event)
+            return
+        event.updated_at = utc_now()
+        self.usage_events[event.id] = event
+
+    def get_usage_events(
+        self,
+        start: datetime,
+        end: datetime | None = None,
+        *,
+        phone_number: str | None = None,
+    ) -> list[UsageEvent]:
+        events = [event for event in self.usage_events.values() if event.created_at >= start]
+        if end:
+            events = [event for event in events if event.created_at < end]
+        if phone_number:
+            events = [event for event in events if event.user_id == phone_number]
+        return sorted(events, key=lambda event: event.created_at, reverse=True)
 
 
 class FirestoreRepository(NutritionRepository):
@@ -282,6 +337,54 @@ class FirestoreRepository(NutritionRepository):
                 "expires_at": expires_at,
             },
         )
+
+    def get_runtime_settings(self) -> RuntimeSettings:
+        return runtime_settings_from_document(self._get("app_settings", "runtime"))
+
+    def add_usage_event(self, event: UsageEvent) -> UsageEvent:
+        try:
+            collection = self.client.collection("usage_events")
+            reference = collection.document(event.id) if event.id else collection.document()
+            event.id = reference.id
+            reference.set(to_document(event))
+            return event
+        except Exception as exc:
+            raise RepositoryError(str(exc)) from exc
+
+    def save_usage_event(self, event: UsageEvent) -> None:
+        if not event.id:
+            self.add_usage_event(event)
+            return
+        event.updated_at = utc_now()
+        self._set("usage_events", event.id, to_document(event))
+
+    def get_usage_events(
+        self,
+        start: datetime,
+        end: datetime | None = None,
+        *,
+        phone_number: str | None = None,
+    ) -> list[UsageEvent]:
+        try:
+            from google.cloud.firestore_v1.base_query import FieldFilter
+
+            query = self.client.collection("usage_events").where(
+                filter=FieldFilter("created_at", ">=", start)
+            )
+            if end:
+                query = query.where(filter=FieldFilter("created_at", "<", end))
+            query = query.order_by(
+                "created_at", direction=self.firestore.Query.DESCENDING
+            )
+            events = [
+                usage_event_from_document(snapshot.to_dict(), snapshot.id)
+                for snapshot in query.stream()
+            ]
+            if phone_number:
+                events = [event for event in events if event.user_id == phone_number]
+            return events
+        except Exception as exc:
+            raise RepositoryError(str(exc)) from exc
 
 
 @lru_cache

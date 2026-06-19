@@ -24,6 +24,7 @@ from app.profile_service import (
 )
 from app.routes.daily_summary import _utc_day_bounds, build_daily_summary_message
 from app.routes.evaluation import build_evaluation_message
+from app.runtime_service import maintenance_active, new_usage_event
 from app.schemas import ChatRequest, ChatResponse
 
 
@@ -160,6 +161,9 @@ async def chat(
                 error_message="Nomor belum terdaftar",
             )
 
+        runtime = repository.get_runtime_settings()
+        usage_event = new_usage_event(repository, phone_number, "chat")
+
         command = _normalize(request.message)
         if command == "login":
             if not whitelist_entry.is_admin:
@@ -238,14 +242,36 @@ async def chat(
             )
 
         if _looks_like_revision(request.message):
+            usage_event.request_type = "revision"
+            if maintenance_active(runtime, settings):
+                usage_event.status = "maintenance"
+                repository.save_usage_event(usage_event)
+                return ChatResponse(
+                    success=False,
+                    formatted_message=runtime.maintenance_message,
+                    error_message="Maintenance aktif",
+                )
             latest_log = _latest_food_log(repository, context.user.id, settings)
             if latest_log is None:
+                usage_event.status = "no_analysis"
+                repository.save_usage_event(usage_event)
                 return ChatResponse(
                     success=True,
                     formatted_message=(
                         "Belum ada hasil makanan hari ini yang dapat direvisi. "
                         "Kirim foto makanannya terlebih dahulu."
                     ),
+                )
+            if latest_log.revision_count >= runtime.max_revisions_per_analysis:
+                usage_event.status = "revision_limit"
+                repository.save_usage_event(usage_event)
+                return ChatResponse(
+                    success=False,
+                    formatted_message=(
+                        "Batas revisi untuk hasil makanan ini sudah tercapai. "
+                        "Kirim foto baru untuk membuat analisis berikutnya."
+                    ),
+                    error_message="Batas revisi tercapai",
                 )
             try:
                 result = await revise_food_analysis(
@@ -256,6 +282,8 @@ async def chat(
                     settings,
                 )
             except OpenRouterError as exc:
+                usage_event.status = "ai_error"
+                repository.save_usage_event(usage_event)
                 logger.error("Revisi makanan melalui OpenRouter gagal: %s", exc)
                 return ChatResponse(
                     success=False,
@@ -268,7 +296,18 @@ async def chat(
             message = _apply_meal_revision(
                 latest_log, result.analysis, result.raw_response
             )
+            latest_log.revision_count += 1
+            latest_log.prompt_tokens += result.usage.prompt_tokens
+            latest_log.completion_tokens += result.usage.completion_tokens
+            latest_log.total_tokens += result.usage.total_tokens
+            latest_log.cost_usd += result.usage.cost_usd
             repository.save_log(latest_log)
+            usage_event.status = "success"
+            usage_event.prompt_tokens = result.usage.prompt_tokens
+            usage_event.completion_tokens = result.usage.completion_tokens
+            usage_event.total_tokens = result.usage.total_tokens
+            usage_event.cost_usd = result.usage.cost_usd
+            repository.save_usage_event(usage_event)
             return ChatResponse(success=True, formatted_message=message)
 
         return ChatResponse(

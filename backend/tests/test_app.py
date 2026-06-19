@@ -260,6 +260,63 @@ class NutriaAppTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(response.status_code, 415)
 
+    def test_manual_maintenance_blocks_image_ai_request(self) -> None:
+        phone = "628123456789"
+        self.seed_complete_profile(phone)
+        self.repository.runtime_settings.maintenance_manual = True
+        ai_called = False
+
+        async def fake_analyze(*_args, **_kwargs):
+            nonlocal ai_called
+            ai_called = True
+            return OpenRouterResult(SAMPLE_ANALYSIS, SAMPLE_ANALYSIS.model_dump_json())
+
+        response = Response()
+        with patch("app.routes.analyze.analyze_food_image", new=fake_analyze):
+            result = asyncio.run(analyze_food(
+                response,
+                phone,
+                image_upload(jpeg_bytes((100, 100)), "image/jpeg"),
+                "Sari",
+                self.repository,
+                get_settings(),
+            ))
+
+        self.assertFalse(result.success)
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(ai_called)
+
+    def test_revision_limit_blocks_ai_request(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone)
+        self.repository.runtime_settings.max_revisions_per_analysis = 0
+        self.repository.add_log(FoodAnalysisLog(
+            user_id=phone,
+            status="success",
+            detected_foods_json=[{"name": "Ayam", "estimated_portion": "1 potong"}],
+            nutrition_json={"energy_kcal": 200},
+        ))
+        ai_called = False
+
+        async def fake_revision(*_args, **_kwargs):
+            nonlocal ai_called
+            ai_called = True
+
+        with patch("app.routes.chat.revise_food_analysis", new=fake_revision):
+            result = asyncio.run(chat_route(
+                ChatRequest(
+                    phone_number=phone,
+                    user_name="Rina",
+                    message="ayamnya ada 2",
+                ),
+                self.repository,
+                get_settings(),
+            ))
+
+        self.assertFalse(result.success)
+        self.assertIn("Batas revisi", result.formatted_message)
+        self.assertFalse(ai_called)
+
 
 if __name__ == "__main__":
     unittest.main()

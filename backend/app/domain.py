@@ -55,6 +55,11 @@ class FoodAnalysisLog:
     formatted_message: str | None = None
     confidence: str | None = None
     error_message: str | None = None
+    revision_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
 
@@ -72,6 +77,38 @@ class WhitelistEntry:
     @property
     def id(self) -> str:
         return self.phone_number
+
+
+@dataclass(slots=True)
+class RuntimeSettings:
+    maintenance_manual: bool = False
+    maintenance_schedule_enabled: bool = False
+    maintenance_start: str = "23:00"
+    maintenance_end: str = "01:00"
+    maintenance_message: str = (
+        "NUTRIA sedang dalam pemeliharaan. Silakan coba kembali setelah maintenance selesai."
+    )
+    image_cooldown_seconds: int = 30
+    image_window_minutes: int = 60
+    max_images_per_window: int = 10
+    max_revisions_per_analysis: int = 3
+    updated_at: datetime = field(default_factory=utc_now)
+    updated_by_phone: str | None = None
+
+
+@dataclass(slots=True)
+class UsageEvent:
+    user_id: str
+    request_type: str
+    status: str = "success"
+    id: str | None = None
+    image_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
 
 
 def to_document(value: Any) -> dict:
@@ -116,6 +153,11 @@ def log_from_document(document: dict, document_id: str) -> FoodAnalysisLog:
         formatted_message=document.get("formatted_message"),
         confidence=document.get("confidence"),
         error_message=document.get("error_message"),
+        revision_count=int(document.get("revision_count", 0)),
+        prompt_tokens=int(document.get("prompt_tokens", 0)),
+        completion_tokens=int(document.get("completion_tokens", 0)),
+        total_tokens=int(document.get("total_tokens", 0)),
+        cost_usd=float(document.get("cost_usd", 0.0)),
         created_at=ensure_utc(document.get("created_at")) or utc_now(),
         updated_at=ensure_utc(document.get("updated_at")) or utc_now(),
     )
@@ -128,6 +170,46 @@ def whitelist_from_document(document: dict) -> WhitelistEntry:
         is_admin=bool(document.get("is_admin", False)),
         is_enabled=bool(document.get("is_enabled", True)),
         created_by_phone=document.get("created_by_phone"),
+        created_at=ensure_utc(document.get("created_at")) or utc_now(),
+        updated_at=ensure_utc(document.get("updated_at")) or utc_now(),
+    )
+
+
+def runtime_settings_from_document(document: dict | None) -> RuntimeSettings:
+    document = document or {}
+    return RuntimeSettings(
+        maintenance_manual=bool(document.get("maintenance_manual", False)),
+        maintenance_schedule_enabled=bool(
+            document.get("maintenance_schedule_enabled", False)
+        ),
+        maintenance_start=str(document.get("maintenance_start", "23:00")),
+        maintenance_end=str(document.get("maintenance_end", "01:00")),
+        maintenance_message=str(
+            document.get("maintenance_message")
+            or RuntimeSettings().maintenance_message
+        ),
+        image_cooldown_seconds=max(0, int(document.get("image_cooldown_seconds", 30))),
+        image_window_minutes=max(1, int(document.get("image_window_minutes", 60))),
+        max_images_per_window=max(1, int(document.get("max_images_per_window", 10))),
+        max_revisions_per_analysis=max(
+            0, int(document.get("max_revisions_per_analysis", 3))
+        ),
+        updated_at=ensure_utc(document.get("updated_at")) or utc_now(),
+        updated_by_phone=document.get("updated_by_phone"),
+    )
+
+
+def usage_event_from_document(document: dict, document_id: str) -> UsageEvent:
+    return UsageEvent(
+        id=document_id,
+        user_id=str(document["user_id"]),
+        request_type=str(document.get("request_type", "chat")),
+        status=str(document.get("status", "success")),
+        image_count=int(document.get("image_count", 0)),
+        prompt_tokens=int(document.get("prompt_tokens", 0)),
+        completion_tokens=int(document.get("completion_tokens", 0)),
+        total_tokens=int(document.get("total_tokens", 0)),
+        cost_usd=float(document.get("cost_usd", 0.0)),
         created_at=ensure_utc(document.get("created_at")) or utc_now(),
         updated_at=ensure_utc(document.get("updated_at")) or utc_now(),
     )

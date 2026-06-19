@@ -162,6 +162,12 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
         processedIds.delete(processedIds.values().next().value);
       }
 
+      try {
+        await socket.readMessages([message.key]);
+      } catch (error) {
+        logger.warn({ err: error, messageId }, "Gagal mengirim tanda pesan dibaca");
+      }
+
       const content = unwrapMessage(message.message);
       const imageMessage = content?.imageMessage;
       const phoneNumber = await phoneFromMessage(message, socket, logger);
@@ -177,6 +183,7 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
       if (!imageMessage) {
         const text = incomingText(content).trim();
         if (text) {
+          await socket.sendPresenceUpdate("composing", jid).catch(() => undefined);
           try {
             const replyMessage = await apiClient.chat({
               phoneNumber,
@@ -195,6 +202,8 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
                 : SYSTEM_BUSY;
             logger.error({ err: error, messageId }, "Gagal memproses chat");
             await socket.sendMessage(jid, { text: reply }, { quoted: message });
+          } finally {
+            await socket.sendPresenceUpdate("paused", jid).catch(() => undefined);
           }
           continue;
         }
@@ -202,6 +211,7 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
         continue;
       }
 
+      await socket.sendPresenceUpdate("composing", jid).catch(() => undefined);
       let imageBuffer;
       try {
         imageBuffer = await downloadMediaMessage(
@@ -216,6 +226,7 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
       } catch (error) {
         logger.error({ err: error, messageId }, "Gagal mengunduh gambar WhatsApp");
         await socket.sendMessage(jid, { text: DOWNLOAD_ERROR }, { quoted: message });
+        await socket.sendPresenceUpdate("paused", jid).catch(() => undefined);
         continue;
       }
 
@@ -249,6 +260,8 @@ export async function startWhatsApp({ sessionPath, apiClient, logger }) {
           logger.error({ err: error, messageId }, logMessage);
           await socket.sendMessage(jid, { text: SYSTEM_BUSY }, { quoted: message });
         }
+      } finally {
+        await socket.sendPresenceUpdate("paused", jid).catch(() => undefined);
       }
     }
   });

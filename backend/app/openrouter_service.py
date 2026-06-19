@@ -1,6 +1,6 @@
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from pydantic import ValidationError
@@ -44,15 +44,25 @@ class OpenRouterResponseError(OpenRouterError):
 
 
 @dataclass(slots=True)
+class AIUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+@dataclass(slots=True)
 class OpenRouterResult:
     analysis: NutritionAnalysis
     raw_response: str
+    usage: AIUsage = field(default_factory=AIUsage)
 
 
 @dataclass(slots=True)
 class MealRevisionResult:
     analysis: MealRevisionAnalysis
     raw_response: str
+    usage: AIUsage = field(default_factory=AIUsage)
 
 
 def _extract_text(payload: dict) -> str:
@@ -110,7 +120,7 @@ def _clean_json_text(raw_text: str) -> str:
 
 async def _request_openrouter(
     messages: list[dict], schema_name: str, schema: dict, settings: Settings
-) -> str:
+) -> tuple[str, AIUsage]:
     if not settings.openrouter_api_key:
         raise OpenRouterAPIError("OPENROUTER_API_KEY belum dikonfigurasi")
 
@@ -157,7 +167,14 @@ async def _request_openrouter(
         raise OpenRouterResponseError(
             "Response OpenRouter bukan JSON", response.text[:10000]
         ) from exc
-    return _extract_text(response_payload)
+    usage_data = response_payload.get("usage") or {}
+    usage = AIUsage(
+        prompt_tokens=int(usage_data.get("prompt_tokens") or 0),
+        completion_tokens=int(usage_data.get("completion_tokens") or 0),
+        total_tokens=int(usage_data.get("total_tokens") or 0),
+        cost_usd=float(usage_data.get("cost") or 0.0),
+    )
+    return _extract_text(response_payload), usage
 
 
 async def analyze_food_image(
@@ -176,13 +193,15 @@ async def analyze_food_image(
                 ],
             },
         ]
-    raw_text = await _request_openrouter(
+    raw_text, usage = await _request_openrouter(
         messages,
         "nutria_food_analysis",
         NutritionAnalysis.model_json_schema(),
         settings,
     )
-    return OpenRouterResult(analysis=_parse_analysis(raw_text), raw_response=raw_text)
+    return OpenRouterResult(
+        analysis=_parse_analysis(raw_text), raw_response=raw_text, usage=usage
+    )
 
 
 async def revise_food_analysis(
@@ -204,7 +223,7 @@ Semua nilai tetap estimasi. Jangan memberi diagnosis. Balas hanya JSON sesuai sc
         "current_plate_analysis": current_plate_analysis,
         "user_correction": correction,
     }
-    raw_text = await _request_openrouter(
+    raw_text, usage = await _request_openrouter(
         [
             {"role": "system", "content": prompt},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -219,4 +238,4 @@ Semua nilai tetap estimasi. Jangan memberi diagnosis. Balas hanya JSON sesuai sc
         )
     except (json.JSONDecodeError, ValidationError) as exc:
         raise OpenRouterResponseError("Response revisi makanan tidak valid", raw_text) from exc
-    return MealRevisionResult(analysis=analysis, raw_response=raw_text)
+    return MealRevisionResult(analysis=analysis, raw_response=raw_text, usage=usage)

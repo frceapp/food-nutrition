@@ -28,6 +28,12 @@ Nilai Web App `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`,
 
 Login admin memakai kode acak singkat yang berlaku beberapa menit. Token sementara disimpan di Firestore menggunakan hash kode sebagai document ID, lalu diambil dan dihapus langsung oleh dashboard. JWT Firebase tidak pernah diletakkan di URL dan dashboard tidak perlu menghubungi backend bot. Atur durasinya melalui `ADMIN_LOGIN_CODE_MINUTES`.
 
+## Kontrol operasional
+
+Pengaturan maintenance dan limit pengguna disimpan pada `app_settings/runtime` di Firestore dan dapat diubah melalui dashboard admin. Maintenance manual maupun terjadwal memblokir request analisis/revisi sebelum OpenRouter dipanggil. Limit gambar mendukung jeda antarfoto, kuota foto per rentang waktu, dan jumlah revisi maksimal per hasil analisis.
+
+Setiap chat, foto, dan revisi dicatat pada `usage_events`. Token dan estimasi biaya diambil dari metadata `usage` OpenRouter; statistik hanya tersedia untuk request yang terjadi setelah versi ini dijalankan.
+
 ## Development backend
 
 ```powershell
