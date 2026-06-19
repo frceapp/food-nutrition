@@ -1,0 +1,10 @@
+.env
+.venv
+venv
+__pycache__
+.pytest_cache
+uploads
+key
+firebase-service-account.json
+*service-account*.json
+tests

@@ -1,0 +1,17 @@
+.env
+backend/.env
+backend/.venv/
+backend/.test-deps/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+backend/uploads/
+backend/key/
+backend/firebase-service-account.json
+backend/*service-account*.json
+whatsapp-gateway/.env
+whatsapp-gateway/node_modules/
+whatsapp-gateway/session/
+npm-debug.log*

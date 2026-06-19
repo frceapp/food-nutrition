@@ -1,0 +1,53 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemini-2.5-flash-lite}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required}
+      FIREBASE_CREDENTIALS_PATH: /run/secrets/firebase-service-account.json
+      APP_ENV: production
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Bangkok}
+      MAX_IMAGE_SIZE_MB: ${MAX_IMAGE_SIZE_MB:-5}
+      OPTIMIZE_IMAGE: ${OPTIMIZE_IMAGE:-true}
+      IMAGE_MAX_DIMENSION: ${IMAGE_MAX_DIMENSION:-1024}
+      IMAGE_JPEG_QUALITY: ${IMAGE_JPEG_QUALITY:-75}
+      OPENROUTER_MAX_OUTPUT_TOKENS: ${OPENROUTER_MAX_OUTPUT_TOKENS:-1200}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      ADMIN_PHONE_NUMBERS: ${ADMIN_PHONE_NUMBERS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ${FIREBASE_CREDENTIALS_PATH:-./backend/key/firebase-service-account.json}:/run/secrets/firebase-service-account.json:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  whatsapp-gateway:
+    build: ./whatsapp-gateway
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+      SESSION_PATH: /app/session
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      BACKEND_TIMEOUT_MS: ${BACKEND_TIMEOUT_MS:-60000}
+    volumes:
+      - whatsapp_session:/app/session
+    depends_on:
+      backend:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+
+volumes:
+  whatsapp_session:
