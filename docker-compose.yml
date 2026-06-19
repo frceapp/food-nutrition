@@ -16,6 +16,7 @@ services:
       OPENROUTER_MAX_OUTPUT_TOKENS: ${OPENROUTER_MAX_OUTPUT_TOKENS:-1200}
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       ADMIN_PHONE_NUMBERS: ${ADMIN_PHONE_NUMBERS:-}
+      ADMIN_LOGIN_CODE_MINUTES: ${ADMIN_LOGIN_CODE_MINUTES:-15}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ${FIREBASE_CREDENTIALS_PATH:-./backend/key/firebase-service-account.json}:/run/secrets/firebase-service-account.json:ro

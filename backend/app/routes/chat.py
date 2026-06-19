@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 
 from app.config import Settings, get_settings
 from app.admin_auth import (
-    create_firebase_login_token,
+    create_admin_login_code,
     get_whitelist_entry,
 )
 from app.domain import FoodAnalysisLog
@@ -167,14 +167,16 @@ async def chat(
                     success=True,
                     formatted_message="Perintah tidak tersedia untuk nomor ini.",
                 )
-            login_token = create_firebase_login_token(whitelist_entry)
+            login_code = create_admin_login_code(
+                repository, whitelist_entry, settings
+            )
             login_url = (
-                f"{settings.frontend_url.rstrip('/')}/login?token={login_token}"
+                f"{settings.frontend_url.rstrip('/')}/login?code={login_code}"
             )
             return ChatResponse(
                 success=True,
                 formatted_message=(
-                    "Tautan login admin Firebase (gunakan segera):\n"
+                    "Tautan login admin (berlaku singkat dan sekali pakai):\n"
                     f"{login_url}"
                 ),
             )

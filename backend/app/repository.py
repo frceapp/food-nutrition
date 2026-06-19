@@ -60,6 +60,15 @@ class NutritionRepository(ABC):
     @abstractmethod
     def save_whitelist(self, entry: WhitelistEntry) -> None: ...
 
+    @abstractmethod
+    def store_login_code(
+        self,
+        code_hash: str,
+        phone_number: str,
+        custom_token: str,
+        expires_at: datetime,
+    ) -> None: ...
+
 
 class InMemoryRepository(NutritionRepository):
     def __init__(self) -> None:
@@ -67,12 +76,14 @@ class InMemoryRepository(NutritionRepository):
         self.profiles: dict[str, UserProfile] = {}
         self.logs: dict[str, FoodAnalysisLog] = {}
         self.whitelist: dict[str, WhitelistEntry] = {}
+        self.login_codes: dict[str, tuple[str, str, datetime]] = {}
 
     def clear(self) -> None:
         self.users.clear()
         self.profiles.clear()
         self.logs.clear()
         self.whitelist.clear()
+        self.login_codes.clear()
 
     def get_user(self, phone_number: str) -> User | None:
         return self.users.get(phone_number)
@@ -128,6 +139,15 @@ class InMemoryRepository(NutritionRepository):
     def save_whitelist(self, entry: WhitelistEntry) -> None:
         entry.updated_at = utc_now()
         self.whitelist[entry.phone_number] = entry
+
+    def store_login_code(
+        self,
+        code_hash: str,
+        phone_number: str,
+        custom_token: str,
+        expires_at: datetime,
+    ) -> None:
+        self.login_codes[code_hash] = (phone_number, custom_token, expires_at)
 
 
 class FirestoreRepository(NutritionRepository):
@@ -244,6 +264,24 @@ class FirestoreRepository(NutritionRepository):
     def save_whitelist(self, entry: WhitelistEntry) -> None:
         entry.updated_at = utc_now()
         self._set("whitelist_entries", entry.phone_number, to_document(entry))
+
+    def store_login_code(
+        self,
+        code_hash: str,
+        phone_number: str,
+        custom_token: str,
+        expires_at: datetime,
+    ) -> None:
+        self._set(
+            "admin_login_codes",
+            code_hash,
+            {
+                "phone_number": phone_number,
+                "custom_token": custom_token,
+                "created_at": utc_now(),
+                "expires_at": expires_at,
+            },
+        )
 
 
 @lru_cache

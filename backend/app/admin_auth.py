@@ -1,5 +1,9 @@
+import hashlib
+import secrets
+from datetime import timedelta
+
 from app.config import Settings
-from app.domain import WhitelistEntry
+from app.domain import WhitelistEntry, utc_now
 from app.repository import NutritionRepository, RepositoryError
 
 
@@ -51,3 +55,25 @@ def create_firebase_login_token(entry: WhitelistEntry) -> str:
         return token.decode("utf-8") if isinstance(token, bytes) else str(token)
     except Exception as exc:
         raise RepositoryError(f"Token Firebase tidak dapat dibuat: {exc}") from exc
+
+
+def _login_code_hash(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def create_admin_login_code(
+    repository: NutritionRepository,
+    entry: WhitelistEntry,
+    settings: Settings,
+) -> str:
+    if not entry.is_admin or not entry.is_enabled:
+        raise RepositoryError("Akses admin tidak tersedia")
+    code = secrets.token_urlsafe(24)
+    custom_token = create_firebase_login_token(entry)
+    repository.store_login_code(
+        _login_code_hash(code),
+        entry.phone_number,
+        custom_token,
+        utc_now() + timedelta(minutes=settings.admin_login_code_minutes),
+    )
+    return code

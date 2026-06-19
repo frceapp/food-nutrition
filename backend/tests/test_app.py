@@ -1,9 +1,11 @@
 import asyncio
+import hashlib
 import os
 import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 os.environ["APP_ENV"] = "test"
@@ -139,14 +141,24 @@ class NutriaAppTests(unittest.TestCase):
         self.assertIn("550/1800", daily.formatted_message)
         self.assertIn("7 hari", weekly.formatted_message)
 
-    def test_firebase_custom_token_login(self) -> None:
-        with patch("app.routes.chat.create_firebase_login_token", return_value="firebase-custom-token"):
+    def test_short_login_code_stores_temporary_token(self) -> None:
+        with patch(
+            "app.admin_auth.create_firebase_login_token",
+            return_value="firebase-custom-token",
+        ):
             result = asyncio.run(chat_route(
                 ChatRequest(phone_number="628000000000", user_name="Admin", message="login"),
                 self.repository,
                 get_settings(),
             ))
-        self.assertIn("/login?token=firebase-custom-token", result.formatted_message)
+        login_url = result.formatted_message.splitlines()[-1]
+        code = parse_qs(urlparse(login_url).query)["code"][0]
+        self.assertNotIn("eyJ", login_url)
+        self.assertLess(len(login_url), 160)
+        code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+        stored = self.repository.login_codes[code_hash]
+        self.assertEqual(stored[0], "628000000000")
+        self.assertEqual(stored[1], "firebase-custom-token")
 
     def test_unlisted_number_is_rejected(self) -> None:
         result = asyncio.run(chat_route(

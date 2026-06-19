@@ -26,6 +26,8 @@ docker compose up --build
 
 Nilai Web App `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, dan `FIREBASE_APP_ID` dapat memakai nilai yang sama di `.env` dashboard. Service-account dan `OPENROUTER_API_KEY` tetap hanya berada di bot.
 
+Login admin memakai kode acak singkat yang berlaku beberapa menit. Token sementara disimpan di Firestore menggunakan hash kode sebagai document ID, lalu diambil dan dihapus langsung oleh dashboard. JWT Firebase tidak pernah diletakkan di URL dan dashboard tidak perlu menghubungi backend bot. Atur durasinya melalui `ADMIN_LOGIN_CODE_MINUTES`.
+
 ## Development backend
 
 ```powershell
