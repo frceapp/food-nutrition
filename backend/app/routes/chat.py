@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends
 
@@ -8,7 +9,7 @@ from app.admin_auth import (
     create_admin_login_code,
     get_whitelist_entry,
 )
-from app.domain import FoodAnalysisLog
+from app.domain import FoodAnalysisLog, RuntimeSettings, utc_now
 from app.repository import NutritionRepository, RepositoryError, get_repository
 from app.openrouter_service import (
     OpenRouterError,
@@ -47,6 +48,11 @@ Command:
 * evaluasi mingguan — evaluasi 7 hari terakhir
 
 Semua hasil merupakan estimasi dan bukan diagnosis medis."""
+
+HELP_MESSAGE += (
+    "\n\nSetelah hasil foto tampil, balas *YA* jika seluruh makanan dan porsinya "
+    "sudah benar. Jika belum benar, langsung tulis koreksinya dengan bahasa bebas."
+)
 
 DAILY_COMMANDS = {
     "cek",
@@ -104,6 +110,33 @@ def _latest_food_log(
     return logs[0] if logs else None
 
 
+def _pending_food_log(
+    repository: NutritionRepository,
+    user_id: str,
+    settings: Settings,
+    runtime: RuntimeSettings,
+) -> FoodAnalysisLog | None:
+    utc_start, utc_end = _utc_day_bounds(settings.app_timezone)
+    logs = repository.get_logs(
+        user_id,
+        utc_start,
+        utc_end,
+        successful_only=True,
+        ascending=False,
+    )
+    latest = logs[0] if logs else None
+    if latest is None or not latest.awaiting_confirmation:
+        return None
+    confirmation_deadline = latest.updated_at + timedelta(
+        minutes=runtime.confirmation_timeout_minutes
+    )
+    if utc_now() >= confirmation_deadline:
+        latest.awaiting_confirmation = False
+        repository.save_log(latest)
+        return None
+    return latest
+
+
 def _apply_meal_revision(log: FoodAnalysisLog, analysis, raw_response: str) -> str:
     log.detected_foods_json = [
         item.model_dump(mode="json") for item in analysis.detected_foods
@@ -130,6 +163,10 @@ def _apply_meal_revision(log: FoodAnalysisLog, analysis, raw_response: str) -> s
         f"* Protein: ±{nutrition.protein_g:g} gram\n"
         f"* Lemak: ±{nutrition.fat_g:g} gram\n"
         f"* Serat: ±{nutrition.fiber_g:g} gram"
+    )
+    message += (
+        "\n\nJika hasil ini sudah benar, balas *YA*. "
+        "Jika belum, tulis koreksinya lagi."
     )
     log.formatted_message = message
     return message
@@ -180,7 +217,8 @@ async def chat(
             return ChatResponse(
                 success=True,
                 formatted_message=(
-                    "Tautan login admin (berlaku singkat dan sekali pakai):\n"
+                    "Tautan login admin (berlaku "
+                    f"{settings.admin_login_code_minutes} menit dan sekali pakai):\n"
                     f"{login_url}"
                 ),
             )
@@ -196,7 +234,26 @@ async def chat(
                 first_message = f"{INTRO_MESSAGE}\n\n{HELP_MESSAGE}"
             return ChatResponse(success=True, formatted_message=first_message)
 
-        if command in {"help", "tolong", "bantuan", "menu"}:
+        pending_log = (
+            _pending_food_log(repository, context.user.id, settings, runtime)
+            if context.profile.onboarding_step == "complete"
+            else None
+        )
+
+        if pending_log is not None and command == "ya":
+            pending_log.awaiting_confirmation = False
+            repository.save_log(pending_log)
+            usage_event.status = "confirmed"
+            repository.save_usage_event(usage_event)
+            return ChatResponse(
+                success=True,
+                formatted_message=(
+                    "Hasil makanan sudah dikonfirmasi dan tersimpan. "
+                    "Kamu bisa mengirim foto makanan berikutnya."
+                ),
+            )
+
+        if pending_log is None and command in {"help", "tolong", "bantuan", "menu"}:
             suffix = (
                 ""
                 if context.profile.onboarding_step == "complete"
@@ -211,29 +268,29 @@ async def chat(
             repository.save_profile(context.profile)
             return ChatResponse(success=True, formatted_message=message)
 
-        if command == "profil":
+        if pending_log is None and command == "profil":
             return ChatResponse(
                 success=True, formatted_message=format_profile(context.profile)
             )
-        if command in {"ubah profil", "reset profil", "perbarui profil"}:
+        if pending_log is None and command in {"ubah profil", "reset profil", "perbarui profil"}:
             message = reset_profile(context.profile)
             repository.save_profile(context.profile)
             return ChatResponse(success=True, formatted_message=message)
-        if command in DAILY_COMMANDS:
+        if pending_log is None and command in DAILY_COMMANDS:
             return ChatResponse(
                 success=True,
                 formatted_message=build_daily_summary_message(
                     repository, context.user, settings
                 ),
             )
-        if command in DAILY_EVALUATION_COMMANDS:
+        if pending_log is None and command in DAILY_EVALUATION_COMMANDS:
             return ChatResponse(
                 success=True,
                 formatted_message=build_evaluation_message(
                     repository, context.user, context.profile, settings, "daily"
                 ),
             )
-        if command in WEEKLY_EVALUATION_COMMANDS:
+        if pending_log is None and command in WEEKLY_EVALUATION_COMMANDS:
             return ChatResponse(
                 success=True,
                 formatted_message=build_evaluation_message(
@@ -241,7 +298,7 @@ async def chat(
                 ),
             )
 
-        if _looks_like_revision(request.message):
+        if pending_log is not None or _looks_like_revision(request.message):
             usage_event.request_type = "revision"
             if maintenance_active(runtime, settings):
                 usage_event.status = "maintenance"
@@ -251,7 +308,9 @@ async def chat(
                     formatted_message=runtime.maintenance_message,
                     error_message="Maintenance aktif",
                 )
-            latest_log = _latest_food_log(repository, context.user.id, settings)
+            latest_log = pending_log or _latest_food_log(
+                repository, context.user.id, settings
+            )
             if latest_log is None:
                 usage_event.status = "no_analysis"
                 repository.save_usage_event(usage_event)

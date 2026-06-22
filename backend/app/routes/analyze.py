@@ -61,6 +61,7 @@ def _save_log(
     completion_tokens: int = 0,
     total_tokens: int = 0,
     cost_usd: float = 0.0,
+    awaiting_confirmation: bool = False,
 ) -> None:
     log = FoodAnalysisLog(
         user_id=user.id,
@@ -85,6 +86,7 @@ def _save_log(
         confidence=analysis.confidence if analysis else None,
         status=log_status,
         error_message=error_message,
+        awaiting_confirmation=awaiting_confirmation,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
@@ -240,7 +242,12 @@ async def analyze_food(
         result = await analyze_food_image(
             optimized_image.data, optimized_image.mime_type, settings
         )
-        formatted_message = format_nutrition_message(result.analysis)
+        formatted_message = (
+            f"{format_nutrition_message(result.analysis)}\n\n"
+            "Jika semua makanan dan porsinya sudah benar, balas *YA*.\n"
+            "Jika masih ada yang salah, langsung tulis koreksinya. "
+            "Contoh: *ayamnya ada 2* atau *itu bukan ayam tapi daging sapi*."
+        )
         _save_log(
             repository,
             user,
@@ -252,6 +259,7 @@ async def analyze_food(
             completion_tokens=result.usage.completion_tokens,
             total_tokens=result.usage.total_tokens,
             cost_usd=result.usage.cost_usd,
+            awaiting_confirmation=True,
         )
         usage_event.status = "success"
         usage_event.prompt_tokens = result.usage.prompt_tokens

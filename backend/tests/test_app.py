@@ -3,6 +3,7 @@ import hashlib
 import os
 import tempfile
 import unittest
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -16,7 +17,7 @@ from PIL import Image
 from starlette.datastructures import Headers
 
 from app.config import Settings, get_settings
-from app.domain import FoodAnalysisLog, User, UserProfile, WhitelistEntry
+from app.domain import FoodAnalysisLog, User, UserProfile, WhitelistEntry, utc_now
 from app.openrouter_service import MealRevisionResult, OpenRouterResult
 from app.repository import InMemoryRepository, get_repository
 from app.routes.analyze import analyze_food
@@ -159,6 +160,7 @@ class NutriaAppTests(unittest.TestCase):
         stored = self.repository.login_codes[code_hash]
         self.assertEqual(stored[0], "628000000000")
         self.assertEqual(stored[1], "firebase-custom-token")
+        self.assertGreater(stored[2] - utc_now(), timedelta(minutes=59))
 
     def test_unlisted_number_is_rejected(self) -> None:
         result = asyncio.run(chat_route(
@@ -246,6 +248,9 @@ class NutriaAppTests(unittest.TestCase):
         self.assertEqual(optimized["mime_type"], "image/jpeg")
         self.assertLessEqual(max(optimized["size"]), 1024)
         self.assertEqual(len(self.repository.logs), 1)
+        saved_log = next(iter(self.repository.logs.values()))
+        self.assertTrue(saved_log.awaiting_confirmation)
+        self.assertIn("balas *YA*", result.formatted_message)
 
     def test_rejects_non_image(self) -> None:
         response = Response()
@@ -316,6 +321,82 @@ class NutriaAppTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("Batas revisi", result.formatted_message)
         self.assertFalse(ai_called)
+
+    def test_pending_analysis_treats_free_text_as_revision_until_yes(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone)
+        log = self.repository.add_log(FoodAnalysisLog(
+            user_id=phone,
+            status="success",
+            awaiting_confirmation=True,
+            detected_foods_json=[{"name": "Nasi", "estimated_portion": "1 centong"}],
+            nutrition_json={"energy_kcal": 200},
+        ))
+        revision = MealRevisionAnalysis.model_validate({
+            "detected_foods": [{"name": "Nasi", "estimated_portion": "2 centong", "category": "karbohidrat", "emoji": "nasi"}],
+            "nutrition_estimate": {"energy_kcal": 400, "carbohydrate_g": 80, "protein_g": 8, "fat_g": 1, "fiber_g": 2, "calcium_note": "Belum pasti"},
+            "plate_analysis": {"carbohydrate_percent": 100, "carbohydrate_status": "berlebih", "protein_percent": 0, "protein_status": "kurang", "vegetable_percent": 0, "vegetable_status": "kurang", "fruit_percent": 0, "fruit_status": "belum ada"},
+            "confidence": "medium",
+        })
+        received_correction = ""
+
+        async def fake_revision(*args, **_kwargs):
+            nonlocal received_correction
+            received_correction = args[3]
+            return MealRevisionResult(revision, revision.model_dump_json())
+
+        with patch("app.routes.chat.revise_food_analysis", new=fake_revision):
+            revised = asyncio.run(chat_route(
+                ChatRequest(
+                    phone_number=phone,
+                    user_name="Rina",
+                    message="nasi putih 2 centong",
+                ),
+                self.repository,
+                get_settings(),
+            ))
+
+        self.assertEqual(received_correction, "nasi putih 2 centong")
+        self.assertIn("balas *YA*", revised.formatted_message)
+        self.assertTrue(self.repository.logs[log.id].awaiting_confirmation)
+
+        confirmed = asyncio.run(chat_route(
+            ChatRequest(phone_number=phone, user_name="Rina", message="YA"),
+            self.repository,
+            get_settings(),
+        ))
+        self.assertTrue(confirmed.success)
+        self.assertIn("dikonfirmasi", confirmed.formatted_message)
+        self.assertFalse(self.repository.logs[log.id].awaiting_confirmation)
+
+    def test_pending_analysis_auto_confirms_after_timeout(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone)
+        log = self.repository.add_log(FoodAnalysisLog(
+            user_id=phone,
+            status="success",
+            awaiting_confirmation=True,
+            detected_foods_json=[{"name": "Nasi", "estimated_portion": "1 centong"}],
+            nutrition_json={"energy_kcal": 200},
+            updated_at=utc_now() - timedelta(minutes=2),
+        ))
+        ai_called = False
+
+        async def fake_revision(*_args, **_kwargs):
+            nonlocal ai_called
+            ai_called = True
+
+        with patch("app.routes.chat.revise_food_analysis", new=fake_revision):
+            result = asyncio.run(chat_route(
+                ChatRequest(phone_number=phone, user_name="Rina", message="profil"),
+                self.repository,
+                get_settings(),
+            ))
+
+        self.assertTrue(result.success)
+        self.assertIn("IMT", result.formatted_message)
+        self.assertFalse(ai_called)
+        self.assertFalse(self.repository.logs[log.id].awaiting_confirmation)
 
 
 if __name__ == "__main__":

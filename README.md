@@ -26,11 +26,13 @@ docker compose up --build
 
 Nilai Web App `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, dan `FIREBASE_APP_ID` dapat memakai nilai yang sama di `.env` dashboard. Service-account dan `OPENROUTER_API_KEY` tetap hanya berada di bot.
 
-Login admin memakai kode acak singkat yang berlaku beberapa menit. Token sementara disimpan di Firestore menggunakan hash kode sebagai document ID, lalu diambil dan dihapus langsung oleh dashboard. JWT Firebase tidak pernah diletakkan di URL dan dashboard tidak perlu menghubungi backend bot. Atur durasinya melalui `ADMIN_LOGIN_CODE_MINUTES`.
+Login admin memakai kode acak singkat yang berlaku 60 menit secara default. Token sementara disimpan di Firestore menggunakan hash kode sebagai document ID, lalu diambil dan dihapus langsung oleh dashboard. JWT Firebase tidak pernah diletakkan di URL dan dashboard tidak perlu menghubungi backend bot. Atur durasinya melalui `ADMIN_LOGIN_CODE_MINUTES`.
 
 ## Kontrol operasional
 
 Pengaturan maintenance dan limit pengguna disimpan pada `app_settings/runtime` di Firestore dan dapat diubah melalui dashboard admin. Maintenance manual maupun terjadwal memblokir request analisis/revisi sebelum OpenRouter dipanggil. Limit gambar mendukung jeda antarfoto, kuota foto per rentang waktu, dan jumlah revisi maksimal per hasil analisis.
+
+Hasil analisis menunggu balasan `YA` atau revisi bebas. Jika tidak ada balasan sampai `confirmation_timeout_minutes` terlewati, hasil otomatis dianggap final saat pesan berikutnya diproses. Nilai defaultnya 1 menit dan dapat diubah dari dashboard admin.
 
 Setiap chat, foto, dan revisi dicatat pada `usage_events`. Token dan estimasi biaya diambil dari metadata `usage` OpenRouter; statistik hanya tersedia untuk request yang terjadi setelah versi ini dijalankan.
 

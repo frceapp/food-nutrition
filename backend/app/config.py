@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     cors_origins: str = ""
     admin_phone_numbers: str = ""
-    admin_login_code_minutes: int = Field(default=15, ge=1, le=30)
+    admin_login_code_minutes: int = Field(default=60, ge=1, le=1440)
     firebase_project_id: str = ""
     firebase_credentials_path: Path | None = None
     # Dipakai hanya oleh scripts/migrate_mysql_to_firestore.py.

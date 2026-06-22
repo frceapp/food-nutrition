@@ -55,6 +55,7 @@ class FoodAnalysisLog:
     formatted_message: str | None = None
     confidence: str | None = None
     error_message: str | None = None
+    awaiting_confirmation: bool = False
     revision_count: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -92,6 +93,7 @@ class RuntimeSettings:
     image_window_minutes: int = 60
     max_images_per_window: int = 10
     max_revisions_per_analysis: int = 3
+    confirmation_timeout_minutes: int = 1
     updated_at: datetime = field(default_factory=utc_now)
     updated_by_phone: str | None = None
 
@@ -153,6 +155,7 @@ def log_from_document(document: dict, document_id: str) -> FoodAnalysisLog:
         formatted_message=document.get("formatted_message"),
         confidence=document.get("confidence"),
         error_message=document.get("error_message"),
+        awaiting_confirmation=bool(document.get("awaiting_confirmation", False)),
         revision_count=int(document.get("revision_count", 0)),
         prompt_tokens=int(document.get("prompt_tokens", 0)),
         completion_tokens=int(document.get("completion_tokens", 0)),
@@ -193,6 +196,9 @@ def runtime_settings_from_document(document: dict | None) -> RuntimeSettings:
         max_images_per_window=max(1, int(document.get("max_images_per_window", 10))),
         max_revisions_per_analysis=max(
             0, int(document.get("max_revisions_per_analysis", 3))
+        ),
+        confirmation_timeout_minutes=max(
+            1, int(document.get("confirmation_timeout_minutes", 1))
         ),
         updated_at=ensure_utc(document.get("updated_at")) or utc_now(),
         updated_by_phone=document.get("updated_by_phone"),
