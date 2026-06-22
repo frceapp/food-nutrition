@@ -162,6 +162,30 @@ class NutriaAppTests(unittest.TestCase):
         self.assertEqual(stored[1], "firebase-custom-token")
         self.assertGreater(stored[2] - utc_now(), timedelta(minutes=59))
 
+    def test_regular_user_can_request_dashboard_login(self) -> None:
+        with patch(
+            "app.admin_auth.create_firebase_login_token",
+            return_value="firebase-user-token",
+        ):
+            result = asyncio.run(chat_route(
+                ChatRequest(
+                    phone_number="628123456789",
+                    user_name="Sari",
+                    message="dashboard",
+                ),
+                self.repository,
+                get_settings(),
+            ))
+
+        self.assertTrue(result.success)
+        self.assertIn("/login?code=", result.formatted_message)
+        code = parse_qs(urlparse(result.formatted_message.splitlines()[-1]).query)["code"][0]
+        stored = self.repository.login_codes[
+            hashlib.sha256(code.encode("utf-8")).hexdigest()
+        ]
+        self.assertEqual(stored[0], "628123456789")
+        self.assertEqual(stored[1], "firebase-user-token")
+
     def test_unlisted_number_is_rejected(self) -> None:
         result = asyncio.run(chat_route(
             ChatRequest(phone_number="628999999999", user_name="Unknown", message="halo"),

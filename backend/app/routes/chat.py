@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.config import Settings, get_settings
 from app.admin_auth import (
-    create_admin_login_code,
+    create_dashboard_login_code,
     get_whitelist_entry,
 )
 from app.domain import FoodAnalysisLog, RuntimeSettings, utc_now
@@ -51,7 +51,8 @@ Semua hasil merupakan estimasi dan bukan diagnosis medis."""
 
 HELP_MESSAGE += (
     "\n\nSetelah hasil foto tampil, balas *YA* jika seluruh makanan dan porsinya "
-    "sudah benar. Jika belum benar, langsung tulis koreksinya dengan bahasa bebas."
+    "sudah benar. Jika belum benar, langsung tulis koreksinya dengan bahasa bebas.\n\n"
+    "* login / dashboard - buka grafik nutrisi pribadi di website"
 )
 
 DAILY_COMMANDS = {
@@ -202,13 +203,8 @@ async def chat(
         usage_event = new_usage_event(repository, phone_number, "chat")
 
         command = _normalize(request.message)
-        if command == "login":
-            if not whitelist_entry.is_admin:
-                return ChatResponse(
-                    success=True,
-                    formatted_message="Perintah tidak tersedia untuk nomor ini.",
-                )
-            login_code = create_admin_login_code(
+        if command in {"login", "dashboard", "login/dashboard"}:
+            login_code = create_dashboard_login_code(
                 repository, whitelist_entry, settings
             )
             login_url = (
@@ -217,7 +213,7 @@ async def chat(
             return ChatResponse(
                 success=True,
                 formatted_message=(
-                    "Tautan login admin (berlaku "
+                    "Tautan dashboard (berlaku "
                     f"{settings.admin_login_code_minutes} menit dan sekali pakai):\n"
                     f"{login_url}"
                 ),

@@ -39,17 +39,18 @@ def bootstrap_admins(repository: NutritionRepository, settings: Settings) -> Non
 
 
 def create_firebase_login_token(entry: WhitelistEntry) -> str:
-    if not entry.is_admin or not entry.is_enabled:
-        raise RepositoryError("Akses admin tidak tersedia")
+    if not entry.is_enabled:
+        raise RepositoryError("Akses dashboard tidak tersedia")
     try:
         from firebase_admin import auth
 
+        role = "admin" if entry.is_admin else "user"
         token = auth.create_custom_token(
-            f"admin:{entry.phone_number}",
+            f"{role}:{entry.phone_number}",
             {
-                "admin": True,
+                "admin": entry.is_admin,
                 "phone_number": entry.phone_number,
-                "label": entry.label or "Admin",
+                "label": entry.label or entry.phone_number,
             },
         )
         return token.decode("utf-8") if isinstance(token, bytes) else str(token)
@@ -61,13 +62,13 @@ def _login_code_hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def create_admin_login_code(
+def create_dashboard_login_code(
     repository: NutritionRepository,
     entry: WhitelistEntry,
     settings: Settings,
 ) -> str:
-    if not entry.is_admin or not entry.is_enabled:
-        raise RepositoryError("Akses admin tidak tersedia")
+    if not entry.is_enabled:
+        raise RepositoryError("Akses dashboard tidak tersedia")
     code = secrets.token_urlsafe(24)
     custom_token = create_firebase_login_token(entry)
     repository.store_login_code(
@@ -77,3 +78,7 @@ def create_admin_login_code(
         utc_now() + timedelta(minutes=settings.admin_login_code_minutes),
     )
     return code
+
+
+# Alias untuk kompatibilitas kode lama.
+create_admin_login_code = create_dashboard_login_code
