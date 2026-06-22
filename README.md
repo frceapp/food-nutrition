@@ -32,7 +32,9 @@ Pengguna whitelist dapat mengirim command `login` atau `dashboard` untuk mempero
 
 Pengaturan maintenance dan limit pengguna disimpan pada `app_settings/runtime` di Firestore dan dapat diubah melalui dashboard admin. Maintenance manual maupun terjadwal memblokir request analisis/revisi sebelum OpenRouter dipanggil. Limit gambar mendukung jeda antarfoto, kuota foto per rentang waktu, dan jumlah revisi maksimal per hasil analisis.
 
-Hasil analisis menunggu balasan `YA` atau revisi bebas. Jika tidak ada balasan sampai `confirmation_timeout_minutes` terlewati, hasil otomatis dianggap final saat pesan berikutnya diproses. Nilai defaultnya 1 menit dan dapat diubah dari dashboard admin.
+Hasil analisis menunggu balasan `YA` atau revisi bebas. Pesan WhatsApp menampilkan durasi revisi yang tersisa. Jika tidak ada balasan sampai `confirmation_timeout_minutes` terlewati, background timer menutup revisi secara otomatis; pemeriksaan saat pesan berikutnya tetap menjadi fallback jika proses bot sempat restart. Nilai defaultnya 1 menit dan dapat diubah dari dashboard admin.
+
+Balasan `TIDAK` mengubah log menjadi `rejected`. Data mentah tetap tersimpan untuk audit admin, tetapi tidak ikut ringkasan, evaluasi harian, atau evaluasi mingguan pengguna.
 
 Setiap chat, foto, dan revisi dicatat pada `usage_events`. Token dan estimasi biaya diambil dari metadata `usage` OpenRouter; statistik hanya tersedia untuk request yang terjadi setelah versi ini dijalankan.
 

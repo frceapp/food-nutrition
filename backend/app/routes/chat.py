@@ -5,6 +5,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends
 
 from app.config import Settings, get_settings
+from app.confirmation_service import schedule_auto_close
 from app.admin_auth import (
     create_dashboard_login_code,
     get_whitelist_entry,
@@ -51,7 +52,8 @@ Semua hasil merupakan estimasi dan bukan diagnosis medis."""
 
 HELP_MESSAGE += (
     "\n\nSetelah hasil foto tampil, balas *YA* jika seluruh makanan dan porsinya "
-    "sudah benar. Jika belum benar, langsung tulis koreksinya dengan bahasa bebas.\n\n"
+    "sudah benar. Balas *TIDAK* agar hasil tetap diarsipkan tetapi tidak dihitung. "
+    "Jika belum benar, langsung tulis koreksinya dengan bahasa bebas.\n\n"
     "* login / dashboard - buka grafik nutrisi pribadi di website"
 )
 
@@ -138,7 +140,12 @@ def _pending_food_log(
     return latest
 
 
-def _apply_meal_revision(log: FoodAnalysisLog, analysis, raw_response: str) -> str:
+def _apply_meal_revision(
+    log: FoodAnalysisLog,
+    analysis,
+    raw_response: str,
+    confirmation_timeout_minutes: int,
+) -> str:
     log.detected_foods_json = [
         item.model_dump(mode="json") for item in analysis.detected_foods
     ]
@@ -166,7 +173,9 @@ def _apply_meal_revision(log: FoodAnalysisLog, analysis, raw_response: str) -> s
         f"* Serat: ±{nutrition.fiber_g:g} gram"
     )
     message += (
-        "\n\nJika hasil ini sudah benar, balas *YA*. "
+        f"\n\nWaktu revisi tersisa: *{confirmation_timeout_minutes} menit*.\n"
+        "Jika hasil ini sudah benar, balas *YA*. "
+        "Balas *TIDAK* agar hasil tidak dihitung. "
         "Jika belum, tulis koreksinya lagi."
     )
     log.formatted_message = message
@@ -246,6 +255,26 @@ async def chat(
                 formatted_message=(
                     "Hasil makanan sudah dikonfirmasi dan tersimpan. "
                     "Kamu bisa mengirim foto makanan berikutnya."
+                ),
+            )
+
+        if pending_log is not None and command in {
+            "tidak",
+            "nggak",
+            "enggak",
+            "gak",
+            "ga",
+        }:
+            pending_log.awaiting_confirmation = False
+            pending_log.status = "rejected"
+            repository.save_log(pending_log)
+            usage_event.status = "rejected"
+            repository.save_usage_event(usage_event)
+            return ChatResponse(
+                success=True,
+                formatted_message=(
+                    "Hasil tetap diarsipkan untuk admin, tetapi tidak dihitung "
+                    "dalam ringkasan atau evaluasi nutrisi kamu."
                 ),
             )
 
@@ -349,7 +378,10 @@ async def chat(
                     error_message="Revisi makanan gagal",
                 )
             message = _apply_meal_revision(
-                latest_log, result.analysis, result.raw_response
+                latest_log,
+                result.analysis,
+                result.raw_response,
+                runtime.confirmation_timeout_minutes,
             )
             latest_log.revision_count += 1
             latest_log.prompt_tokens += result.usage.prompt_tokens
@@ -357,6 +389,11 @@ async def chat(
             latest_log.total_tokens += result.usage.total_tokens
             latest_log.cost_usd += result.usage.cost_usd
             repository.save_log(latest_log)
+            schedule_auto_close(
+                repository,
+                latest_log,
+                runtime.confirmation_timeout_minutes,
+            )
             usage_event.status = "success"
             usage_event.prompt_tokens = result.usage.prompt_tokens
             usage_event.completion_tokens = result.usage.completion_tokens

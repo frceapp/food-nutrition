@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 
 from app.config import Settings, get_settings
 from app.admin_auth import get_whitelist_entry
+from app.confirmation_service import schedule_auto_close
 from app.domain import FoodAnalysisLog, UsageEvent, User
 from app.repository import NutritionRepository, RepositoryError, get_repository
 from app.openrouter_service import (
@@ -62,7 +63,7 @@ def _save_log(
     total_tokens: int = 0,
     cost_usd: float = 0.0,
     awaiting_confirmation: bool = False,
-) -> None:
+) -> FoodAnalysisLog:
     log = FoodAnalysisLog(
         user_id=user.id,
         image_path=None,
@@ -92,7 +93,7 @@ def _save_log(
         total_tokens=total_tokens,
         cost_usd=cost_usd,
     )
-    repository.add_log(log)
+    return repository.add_log(log)
 
 
 def _safe_save_failure(
@@ -244,11 +245,13 @@ async def analyze_food(
         )
         formatted_message = (
             f"{format_nutrition_message(result.analysis)}\n\n"
+            f"Waktu revisi tersisa: *{runtime.confirmation_timeout_minutes} menit*.\n"
             "Jika semua makanan dan porsinya sudah benar, balas *YA*.\n"
+            "Jika hasil ini tidak sesuai dan tidak ingin dihitung, balas *TIDAK*.\n"
             "Jika masih ada yang salah, langsung tulis koreksinya. "
             "Contoh: *ayamnya ada 2* atau *itu bukan ayam tapi daging sapi*."
         )
-        _save_log(
+        saved_log = _save_log(
             repository,
             user,
             analysis=result.analysis,
@@ -260,6 +263,11 @@ async def analyze_food(
             total_tokens=result.usage.total_tokens,
             cost_usd=result.usage.cost_usd,
             awaiting_confirmation=True,
+        )
+        schedule_auto_close(
+            repository,
+            saved_log,
+            runtime.confirmation_timeout_minutes,
         )
         usage_event.status = "success"
         usage_event.prompt_tokens = result.usage.prompt_tokens

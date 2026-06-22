@@ -17,6 +17,7 @@ from PIL import Image
 from starlette.datastructures import Headers
 
 from app.config import Settings, get_settings
+from app.confirmation_service import auto_close_confirmation
 from app.domain import FoodAnalysisLog, User, UserProfile, WhitelistEntry, utc_now
 from app.openrouter_service import MealRevisionResult, OpenRouterResult
 from app.repository import InMemoryRepository, get_repository
@@ -420,6 +421,58 @@ class NutriaAppTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("IMT", result.formatted_message)
         self.assertFalse(ai_called)
+        self.assertFalse(self.repository.logs[log.id].awaiting_confirmation)
+
+    def test_no_rejects_analysis_without_deleting_admin_log(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone)
+        log = self.repository.add_log(FoodAnalysisLog(
+            user_id=phone,
+            status="success",
+            awaiting_confirmation=True,
+            detected_foods_json=[{"name": "Nasi", "estimated_portion": "1 centong"}],
+            nutrition_json={
+                "energy_kcal": 200,
+                "carbohydrate_g": 40,
+                "protein_g": 4,
+                "fat_g": 1,
+                "fiber_g": 1,
+            },
+        ))
+
+        result = asyncio.run(chat_route(
+            ChatRequest(phone_number=phone, user_name="Rina", message="TIDAK"),
+            self.repository,
+            get_settings(),
+        ))
+
+        saved = self.repository.logs[log.id]
+        self.assertTrue(result.success)
+        self.assertIn("tidak dihitung", result.formatted_message)
+        self.assertEqual(saved.status, "rejected")
+        self.assertFalse(saved.awaiting_confirmation)
+        self.assertEqual(
+            self.repository.get_logs(phone, successful_only=True),
+            [],
+        )
+        self.assertIn(log.id, self.repository.logs)
+
+    def test_confirmation_is_closed_by_background_timer(self) -> None:
+        log = self.repository.add_log(FoodAnalysisLog(
+            user_id="628555555555",
+            status="success",
+            awaiting_confirmation=True,
+            nutrition_json={"energy_kcal": 200},
+        ))
+
+        asyncio.run(auto_close_confirmation(
+            self.repository,
+            log.user_id,
+            log.id,
+            log.updated_at,
+            0,
+        ))
+
         self.assertFalse(self.repository.logs[log.id].awaiting_confirmation)
 
 
