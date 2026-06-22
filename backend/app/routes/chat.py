@@ -24,8 +24,7 @@ from app.profile_service import (
     profile_prompt,
     reset_profile,
 )
-from app.routes.daily_summary import _utc_day_bounds, build_daily_summary_message
-from app.routes.evaluation import build_evaluation_message
+from app.routes.daily_summary import _utc_day_bounds
 from app.runtime_service import maintenance_active, new_usage_event
 from app.schemas import ChatRequest, ChatResponse
 
@@ -35,29 +34,20 @@ router = APIRouter(tags=["chat"])
 PHONE_PATTERN = re.compile(r"^\+?\d{8,20}$")
 HELP_MESSAGE = """Panduan NUTRIA:
 
-📷 Kirim foto makanan dari atas piring untuk analisis.
-✍️ Untuk memperbaiki hasil terakhir, langsung tulis revisinya. Contoh:
-*ada tempe 2 potong juga*, *ayamnya ada 2*, atau
-*itu bukan ayam tapi daging sapi*.
+* Kirim foto makanan dari atas piring untuk dianalisis.
+* Balas YA jika hasilnya benar.
+* Balas TIDAK agar hasil diarsipkan tetapi tidak dihitung.
+* Tulis koreksi dengan bahasa bebas jika deteksi atau porsinya belum benar.
 
 Command:
-* help / tolong — tampilkan panduan
-* profil — lihat IMT dan target kalori
-* ubah profil — isi ulang data profil
-* cek hari ini — total gizi hari ini
-* evaluasi harian — evaluasi terhadap target harian
-* evaluasi mingguan — evaluasi 7 hari terakhir
+* help / tolong - tampilkan panduan
+* profil - lihat IMT dan target kalori
+* ubah profil - isi ulang profil melalui WhatsApp
+* login / dashboard - buka grafik nutrisi dan ubah profil di website
 
 Semua hasil merupakan estimasi dan bukan diagnosis medis."""
 
-HELP_MESSAGE += (
-    "\n\nSetelah hasil foto tampil, balas *YA* jika seluruh makanan dan porsinya "
-    "sudah benar. Balas *TIDAK* agar hasil tetap diarsipkan tetapi tidak dihitung. "
-    "Jika belum benar, langsung tulis koreksinya dengan bahasa bebas.\n\n"
-    "* login / dashboard - buka grafik nutrisi pribadi di website"
-)
-
-DAILY_COMMANDS = {
+DASHBOARD_ONLY_COMMANDS = {
     "cek",
     "info",
     "cek hari ini",
@@ -68,18 +58,13 @@ DAILY_COMMANDS = {
     "info makanan hari ini",
     "cek gizi hari ini",
     "total gizi hari ini",
-}
-DAILY_EVALUATION_COMMANDS = {
     "evaluasi harian",
     "evaluasi hari ini",
     "cek evaluasi harian",
-}
-WEEKLY_EVALUATION_COMMANDS = {
     "evaluasi mingguan",
     "evaluasi minggu ini",
     "cek evaluasi mingguan",
 }
-
 
 def _normalize(message: str) -> str:
     return re.sub(r"\s+", " ", message.lower().strip().rstrip("?!.,"))
@@ -228,6 +213,15 @@ async def chat(
                 ),
             )
 
+        if command in DASHBOARD_ONLY_COMMANDS:
+            return ChatResponse(
+                success=True,
+                formatted_message=(
+                    "Ringkasan dan evaluasi nutrisi tersedia di dashboard. "
+                    "Ketik *dashboard* untuk membuka halaman tersebut."
+                ),
+            )
+
         context = get_or_create_profile(
             repository,
             phone_number,
@@ -301,28 +295,6 @@ async def chat(
             message = reset_profile(context.profile)
             repository.save_profile(context.profile)
             return ChatResponse(success=True, formatted_message=message)
-        if pending_log is None and command in DAILY_COMMANDS:
-            return ChatResponse(
-                success=True,
-                formatted_message=build_daily_summary_message(
-                    repository, context.user, settings
-                ),
-            )
-        if pending_log is None and command in DAILY_EVALUATION_COMMANDS:
-            return ChatResponse(
-                success=True,
-                formatted_message=build_evaluation_message(
-                    repository, context.user, context.profile, settings, "daily"
-                ),
-            )
-        if pending_log is None and command in WEEKLY_EVALUATION_COMMANDS:
-            return ChatResponse(
-                success=True,
-                formatted_message=build_evaluation_message(
-                    repository, context.user, context.profile, settings, "weekly"
-                ),
-            )
-
         if pending_log is not None or _looks_like_revision(request.message):
             usage_event.request_type = "revision"
             if maintenance_active(runtime, settings):

@@ -28,13 +28,15 @@ Nilai Web App `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`,
 
 Pengguna whitelist dapat mengirim command `login` atau `dashboard` untuk memperoleh tautan dashboard pribadi. Admin memakai alur yang sama, tetapi menerima role admin. Kode acak berlaku 60 menit secara default. Token sementara disimpan di Firestore menggunakan hash kode sebagai document ID, lalu diambil dan dihapus langsung oleh dashboard. JWT Firebase tidak pernah diletakkan di URL dan dashboard tidak perlu menghubungi backend bot. Atur durasinya melalui `ADMIN_LOGIN_CODE_MINUTES`.
 
+Command `cek hari ini`, `evaluasi harian`, dan `evaluasi mingguan` tidak tersedia lagi di WhatsApp. Ringkasan, grafik, dan evaluasi tersebut tersedia di dashboard.
+
 ## Kontrol operasional
 
 Pengaturan maintenance dan limit pengguna disimpan pada `app_settings/runtime` di Firestore dan dapat diubah melalui dashboard admin. Maintenance manual maupun terjadwal memblokir request analisis/revisi sebelum OpenRouter dipanggil. Limit gambar mendukung jeda antarfoto, kuota foto per rentang waktu, dan jumlah revisi maksimal per hasil analisis.
 
 Hasil analisis menunggu balasan `YA` atau revisi bebas. Pesan WhatsApp menampilkan durasi revisi yang tersisa. Jika tidak ada balasan sampai `confirmation_timeout_minutes` terlewati, background timer menutup revisi secara otomatis; pemeriksaan saat pesan berikutnya tetap menjadi fallback jika proses bot sempat restart. Nilai defaultnya 1 menit dan dapat diubah dari dashboard admin.
 
-Balasan `TIDAK` mengubah log menjadi `rejected`. Data mentah tetap tersimpan untuk audit admin, tetapi tidak ikut ringkasan, evaluasi harian, atau evaluasi mingguan pengguna.
+Balasan `TIDAK` mengubah log menjadi `rejected`. Data mentah tetap tersimpan untuk audit admin, tetapi tidak ikut total, grafik, atau evaluasi nutrisi pengguna di dashboard.
 
 Setiap chat, foto, dan revisi dicatat pada `usage_events`. Token dan estimasi biaya diambil dari metadata `usage` OpenRouter; statistik hanya tersedia untuk request yang terjadi setelah versi ini dijalankan.
 

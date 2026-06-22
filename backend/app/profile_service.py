@@ -11,8 +11,7 @@ Saya NUTRIA, asisten untuk mencatat estimasi nutrisi dari foto makanan.
 Cara menggunakan:
 1. Lengkapi profil singkat.
 2. Kirim foto makanan dari atas piring.
-3. Ketik *cek hari ini* untuk melihat total gizi.
-4. Ketik *evaluasi harian* atau *evaluasi mingguan* untuk mengecek progres.
+3. Ketik *dashboard* untuk melihat grafik, total gizi, dan evaluasi.
 
 Semua hasil merupakan estimasi visual, bukan diagnosis atau hasil laboratorium.
 
@@ -52,7 +51,7 @@ def get_or_create_profile(
     user = repository.get_user(phone_number)
     if user is None:
         user = User(phone_number=phone_number, name=user_name or None)
-    elif user_name and user.name != user_name:
+    elif user_name and not user.name:
         user.name = user_name
     repository.save_user(user)
 

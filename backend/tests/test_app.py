@@ -211,11 +211,56 @@ class NutriaAppTests(unittest.TestCase):
         height = asyncio.run(send("160"))
         completed = asyncio.run(send("2"))
         help_result = asyncio.run(send("help"))
+        removed_command = asyncio.run(send("cek hari ini"))
         self.assertIn("NUTRIA", intro.formatted_message)
         self.assertIn("tinggi badan", weight.formatted_message)
         self.assertIn("pola aktivitas", height.formatted_message)
         self.assertIn("23.4", completed.formatted_message)
-        self.assertIn("evaluasi mingguan", help_result.formatted_message)
+        self.assertIn("dashboard", help_result.formatted_message)
+        self.assertNotIn("evaluasi mingguan", help_result.formatted_message)
+        self.assertIn("tersedia di dashboard", removed_command.formatted_message)
+
+    def test_dashboard_only_command_does_not_trigger_pending_revision(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone)
+        log = self.repository.add_log(FoodAnalysisLog(
+            user_id=phone,
+            status="success",
+            detected_foods_json=[],
+            nutrition_json={"energy_kcal": 300},
+            awaiting_confirmation=True,
+        ))
+
+        with patch("app.routes.chat.revise_food_analysis") as revise:
+            result = asyncio.run(chat_route(
+                ChatRequest(
+                    phone_number=phone,
+                    user_name="Dewi",
+                    message="evaluasi mingguan",
+                ),
+                self.repository,
+                get_settings(),
+            ))
+
+        revise.assert_not_called()
+        self.assertIn("tersedia di dashboard", result.formatted_message)
+        self.assertEqual(self.repository.logs[log.id].revision_count, 0)
+
+    def test_whatsapp_name_does_not_overwrite_saved_profile_name(self) -> None:
+        phone = "628555555555"
+        self.seed_complete_profile(phone, "Nama Dashboard")
+
+        asyncio.run(chat_route(
+            ChatRequest(
+                phone_number=phone,
+                user_name="Nama WhatsApp",
+                message="profil",
+            ),
+            self.repository,
+            get_settings(),
+        ))
+
+        self.assertEqual(self.repository.users[phone].name, "Nama Dashboard")
 
     def test_free_form_meal_revision(self) -> None:
         self.assertTrue(_looks_like_revision("itu bukan ayam tapi daging sapi"))
